@@ -1,0 +1,214 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: telegram-intel-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: telegram_intel
+      POSTGRES_USER: telegram_user
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-secure_password_123}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=C --lc-ctype=C"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./src/database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    ports:
+      - "5432:5432"
+    networks:
+      - telegram-intel-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U telegram_user -d telegram_intel"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # Redis (Optional - for caching and rate limiting)
+  redis:
+    image: redis:7-alpine
+    container_name: telegram-intel-redis
+    restart: unless-stopped
+    command: redis-server --requirepass ${REDIS_PASSWORD:-redis_password_123}
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - telegram-intel-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # Telegram Intel Monitor Application
+  telegram-intel:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: telegram-intel-app
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      # Database Configuration
+      ENABLE_DATABASE: "true"
+      DB_TYPE: "postgresql"
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: telegram_intel
+      DB_USER: telegram_user
+      DB_PASSWORD: ${DB_PASSWORD:-secure_password_123}
+      
+      # Core Configuration (from .env file)
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL}
+      KEYWORDS: ${KEYWORDS:-crypto,bitcoin,ethereum,alert,urgent,malware,phishing}
+      ALLOWED_CHAT_IDS: ${ALLOWED_CHAT_IDS:-}
+      
+      # Feature Flags
+      ENABLE_OCR: ${ENABLE_OCR:-true}
+      ENABLE_AI_ANALYSIS: ${ENABLE_AI_ANALYSIS:-true}
+      ENABLE_THREAT_ANALYSIS: ${ENABLE_THREAT_ANALYSIS:-true}
+      ENABLE_SENTIMENT_ANALYSIS: ${ENABLE_SENTIMENT_ANALYSIS:-true}
+      ENABLE_TRANSLATION: ${ENABLE_TRANSLATION:-false}
+      ENABLE_SERVER: ${ENABLE_SERVER:-true}
+      
+      # AI Configuration
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      AI_MODEL: ${AI_MODEL:-gpt-3.5-turbo}
+      
+      # OCR Configuration
+      OCR_LANGUAGE: ${OCR_LANGUAGE:-eng}
+      OCR_CONFIDENCE: ${OCR_CONFIDENCE:-60}
+      OCR_MAX_FILE_SIZE: ${OCR_MAX_FILE_SIZE:-10485760}
+      
+      # System Configuration
+      NODE_ENV: ${NODE_ENV:-production}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      ENABLE_FILE_LOGGING: ${ENABLE_FILE_LOGGING:-true}
+      PORT: 3000
+      HOST: "0.0.0.0"
+      
+      # Rate Limiting
+      RATE_LIMIT_WINDOW: ${RATE_LIMIT_WINDOW:-60000}
+      MAX_ALERTS_PER_WINDOW: ${MAX_ALERTS_PER_WINDOW:-10}
+      
+      # Redis Configuration (optional)
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-redis_password_123}
+      
+      # Translation (if enabled)
+      TRANSLATION_TARGET_LANG: ${TRANSLATION_TARGET_LANG:-en}
+      GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-}
+    volumes:
+      # Data persistence
+      - telegram_data:/app/data
+      - telegram_logs:/app/logs
+      - telegram_temp:/app/temp
+      # Optional: Google Cloud credentials
+      - ${GOOGLE_CREDENTIALS_PATH:-./credentials}:/app/credentials:ro
+    ports:
+      - "3000:3000"
+    networks:
+      - telegram-intel-network
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) })"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # pgAdmin (Optional - Database Administration)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: telegram-intel-pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@telegram-intel.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin_password_123}
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    ports:
+      - "8080:80"
+    networks:
+      - telegram-intel-network
+    depends_on:
+      - postgres
+    profiles:
+      - admin
+
+  # Grafana (Optional - Monitoring Dashboard)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: telegram-intel-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-grafana_password_123}
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+      GF_INSTALL_PLUGINS: grafana-clock-panel,grafana-simple-json-datasource
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    ports:
+      - "3001:3000"
+    networks:
+      - telegram-intel-network
+    profiles:
+      - monitoring
+
+  # Prometheus (Optional - Metrics Collection)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: telegram-intel-prometheus
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    volumes:
+      - prometheus_data:/prometheus
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    networks:
+      - telegram-intel-network
+    profiles:
+      - monitoring
+
+# Named volumes for data persistence
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  telegram_data:
+    driver: local
+  telegram_logs:
+    driver: local
+  telegram_temp:
+    driver: local
+  pgadmin_data:
+    driver: local
+  grafana_data:
+    driver: local
+  prometheus_data:
+    driver: local
+
+# Network for inter-service communication
+networks:
+  telegram-intel-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

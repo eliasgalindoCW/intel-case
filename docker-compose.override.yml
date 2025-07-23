@@ -1,0 +1,39 @@
+# Docker Compose Override for Development
+# This file is automatically loaded by docker-compose and provides development-specific configurations
+
+version: '3.8'
+
+services:
+  # Development overrides for the main application
+  telegram-intel:
+    build:
+      target: base  # Use base stage for development with more tools
+    volumes:
+      # Mount source code for development (hot reload)
+      - ./src:/app/src:ro
+      - ./package.json:/app/package.json:ro
+      - ./package-lock.json:/app/package-lock.json:ro
+      # Development data and logs
+      - ./dev-data:/app/data
+      - ./dev-logs:/app/logs
+    environment:
+      # Development environment variables
+      NODE_ENV: development
+      LOG_LEVEL: debug
+      ENABLE_FILE_LOGGING: "true"
+    command: ["npm", "run", "dev"]  # Use nodemon for hot reload
+    
+  # Development database with exposed ports
+  postgres:
+    environment:
+      POSTGRES_DB: telegram_intel_dev
+      POSTGRES_USER: dev_user
+      POSTGRES_PASSWORD: dev_password_123
+    ports:
+      - "5433:5432"  # Use different port to avoid conflicts
+
+  # Redis with development settings
+  redis:
+    command: redis-server --requirepass dev_redis_123 --appendonly yes
+    environment:
+      REDIS_PASSWORD: dev_redis_123

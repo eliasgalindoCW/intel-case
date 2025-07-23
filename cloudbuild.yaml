@@ -1,0 +1,64 @@
+# Google Cloud Build configuration for Telegram Intel Monitor
+steps:
+  # Build the container image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: [
+      'build',
+      '-t', 'gcr.io/$PROJECT_ID/telegram-intel-monitor:$COMMIT_SHA',
+      '-t', 'gcr.io/$PROJECT_ID/telegram-intel-monitor:latest',
+      '.'
+    ]
+
+  # Push the container image to Container Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/telegram-intel-monitor:$COMMIT_SHA']
+  
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/telegram-intel-monitor:latest']
+
+  # Deploy to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'gcloud'
+    args: [
+      'run', 'deploy', 'telegram-intel-monitor',
+      '--image', 'gcr.io/$PROJECT_ID/telegram-intel-monitor:$COMMIT_SHA',
+      '--region', '${_REGION}',
+      '--platform', 'managed',
+      '--allow-unauthenticated',
+      '--port', '3000',
+      '--memory', '1Gi',
+      '--cpu', '1',
+      '--concurrency', '10',
+      '--timeout', '300',
+      '--max-instances', '3',
+      '--set-env-vars', 'NODE_ENV=production,LOG_LEVEL=info',
+      '--set-secrets', '/secrets/telegram-token=telegram-bot-token:latest,/secrets/discord-webhook=discord-webhook-url:latest,/secrets/openai-key=openai-api-key:latest',
+      '--service-account', '${_SERVICE_ACCOUNT}'
+    ]
+
+# Substitutions for customizable values
+substitutions:
+  _REGION: 'us-central1'
+  _SERVICE_ACCOUNT: 'telegram-monitor@${PROJECT_ID}.iam.gserviceaccount.com'
+
+# Build timeout
+timeout: '1200s'
+
+# Build options
+options:
+  machineType: 'E2_HIGHCPU_8'
+  substitution_option: 'ALLOW_LOOSE'
+
+# Images to be pushed to Container Registry
+images:
+  - 'gcr.io/$PROJECT_ID/telegram-intel-monitor:$COMMIT_SHA'
+  - 'gcr.io/$PROJECT_ID/telegram-intel-monitor:latest'
+
+# Build logs
+logsBucket: 'gs://${PROJECT_ID}-cloudbuild-logs'
+
+# Artifacts
+artifacts:
+  objects:
+    location: 'gs://${PROJECT_ID}-artifacts'
+    paths: ['deployment-info.json']
