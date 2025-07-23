@@ -38,6 +38,30 @@ RUN npm ci --only=production && npm cache clean --force
 FROM base AS dev-dependencies
 RUN npm ci && npm cache clean --force
 
+# Development stage
+FROM dev-dependencies AS development
+
+# Copy application code
+COPY src/ ./src/
+COPY .env.example ./
+
+# Create necessary directories
+RUN mkdir -p /app/data /app/logs /app/temp
+
+# Create non-root user
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S telegram -u 1001 -G nodejs
+
+# Set permissions
+RUN chown -R telegram:nodejs /app
+USER telegram
+
+# Expose port
+EXPOSE 3000
+
+# Default command for development
+CMD ["npm", "run", "dev"]
+
 # Production build
 FROM base AS production
 

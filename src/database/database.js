@@ -28,7 +28,6 @@ class DatabaseManager {
             }
 
             await this.migrate();
-            this.isConnected = true;
             logger.info(`Connected to ${this.type} database`);
         } catch (error) {
             logger.error('Database connection failed:', error);
@@ -45,6 +44,7 @@ class DatabaseManager {
         }
 
         this.db = new sqlite3.Database(dbPath);
+        this.isConnected = true;
         
         // Enable foreign keys
         await this.runQuery('PRAGMA foreign_keys = ON');
@@ -60,18 +60,23 @@ class DatabaseManager {
         });
 
         await this.db.connect();
+        this.isConnected = true;
     }
 
     async migrate() {
         const schemaPath = path.join(__dirname, 'schema.sql');
-        const schema = fs.readFileSync(schemaPath, 'utf8');
+        let schema = fs.readFileSync(schemaPath, 'utf8');
+        
+        // Remove multi-line comments
+        schema = schema.replace(/\/\*[\s\S]*?\*\//g, '');
         
         // Split schema by statements and execute
         const statements = schema.split(';').filter(stmt => stmt.trim());
         
         for (const statement of statements) {
-            if (statement.trim() && !statement.trim().startsWith('--')) {
-                await this.runQuery(statement);
+            const trimmed = statement.trim();
+            if (trimmed && !trimmed.startsWith('--')) {
+                await this.runQuery(trimmed);
             }
         }
 

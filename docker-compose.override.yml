@@ -7,7 +7,7 @@ services:
   # Development overrides for the main application
   telegram-intel:
     build:
-      target: base  # Use base stage for development with more tools
+      target: development  # Use development stage with nodemon and dev dependencies
     volumes:
       # Mount source code for development (hot reload)
       - ./src:/app/src:ro
@@ -21,6 +21,12 @@ services:
       NODE_ENV: development
       LOG_LEVEL: debug
       ENABLE_FILE_LOGGING: "true"
+      # Override database credentials for development
+      DB_USER: dev_user
+      DB_PASSWORD: dev_password_123
+      DB_NAME: telegram_intel_dev
+    ports:
+      - "3002:3000"  # Use port 3002 to avoid conflict with SSH processes
     command: ["npm", "run", "dev"]  # Use nodemon for hot reload
     
   # Development database with exposed ports
